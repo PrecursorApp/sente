@@ -10,12 +10,13 @@
 (defprotocol IAsyncNetworkChannel
   ;; Wraps a web server's own async channel/comms interface to abstract away
   ;; implementation differences
-  (send!* [net-ch msg close-after-send?] "Sends a message to channel.")
+  (send!* [net-ch msg close-after-send? on-complete] "Sends a message to channel.")
   (open?  [net-ch] "Returns true iff the channel is currently open.")
   (close! [net-ch] "Closes the channel."))
 
-#+clj (defn send! [net-ch msg & [close-after-send?]]
-        (send!* net-ch msg close-after-send?))
+#+clj (defn send! [net-ch msg & {:keys [close-after-send?
+                                        on-complete]}]
+        (send!* net-ch msg close-after-send? on-complete))
 
 #+clj
 (defprotocol IAsyncNetworkChannelAdapter

@@ -356,7 +356,7 @@
             newly-disconnected?))
 
         send-fn ; server>user (by uid) push
-        (fn [user-id ev & [{:as opts :keys [flush?]}]]
+        (fn [user-id ev & [{:as opts :keys [flush? on-complete]}]]
           (let [uid     (if (= user-id :sente/all-users-without-uid) ::nil-uid user-id)
                 _       (tracef "Chsk send: (->uid %s) %s" uid ev)
                 _       (assert uid
@@ -395,9 +395,9 @@
                           buffered-evs-ppstr combined-packer-meta)
                         (case type
                           :ws   (send-buffered-evs>ws-clients!   conns_
-                                  uid buffered-evs-ppstr)
+                                  uid buffered-evs-ppstr :on-complete on-complete)
                           :ajax (send-buffered-evs>ajax-clients! conns_
-                                  uid buffered-evs-ppstr))))))]
+                                  uid buffered-evs-ppstr :on-complete on-complete))))))]
 
             (if (= ev [:chsk/close]) ; Currently undocumented
               (do
@@ -468,13 +468,13 @@
                        ;; true iff apparent success:
                        (interfaces/send! net-ch
                          (pack packer (meta resp-clj) resp-clj)
-                         :close-after-send)))}))
+                         :close-after-send? true)))}))
 
               (when-not has-cb?
                 (tracef "Chsk send (ajax reply): dummy-cb-200")
                 (interfaces/send! net-ch
                   (pack packer nil :chsk/dummy-cb-200)
-                  :close-after-send))))}))
+                  :close-after-send? true))))}))
 
      :ajax-get-or-ws-handshake-fn ; Ajax handshake/poll, or WebSocket handshake
      (fn [ring-req]
@@ -507,7 +507,7 @@
                        [:chsk/handshake [uid csrf-token]])]
                  (interfaces/send! net-ch
                    (pack packer nil handshake-ev)
-                   (not websocket?))))]
+                   :close-after-send? (not websocket?))))]
 
          (if (str/blank? client-id)
            (let [err-msg "Client's Ring request doesn't have a client id. Does your server have the necessary keyword Ring middleware (`wrap-params` & `wrap-keyword-params`)?"]
@@ -545,11 +545,12 @@
                 (let [[clj ?cb-uuid] (unpack packer req-ppstr)]
                   (receive-event-msg! clj ; Should be ev
                     (when ?cb-uuid
-                      (fn reply-fn [resp-clj] ; Any clj form
+                      (fn reply-fn [resp-clj & {:keys [on-complete]}] ; Any clj form
                         (tracef "Chsk send (ws reply): %s" resp-clj)
                         ;; true iff apparent success:
                         (interfaces/send! net-ch
-                          (pack packer (meta resp-clj) resp-clj ?cb-uuid)))))))
+                          (pack packer (meta resp-clj) resp-clj ?cb-uuid)
+                          :on-complete on-complete))))))
 
               :on-close ; We rely on `on-close` to trigger for _every_ conn!
               (fn [net-ch status]
@@ -608,16 +609,17 @@
 #+clj
 (defn- send-buffered-evs>ws-clients!
   "Actually pushes buffered events (as packed-str) to all uid's WebSocket conns."
-  [conns_ uid buffered-evs-pstr]
+  [conns_ uid buffered-evs-pstr & {:keys [on-complete]}]
   (tracef "send-buffered-evs>ws-clients!: %s" buffered-evs-pstr)
   (doseq [net-ch (vals (get-in @conns_ [:ws uid]))]
-    (interfaces/send! net-ch buffered-evs-pstr)))
+    (interfaces/send! net-ch buffered-evs-pstr :on-complete on-complete)))
 
 #+clj
 (defn- send-buffered-evs>ajax-clients!
   "Actually pushes buffered events (as packed-str) to all uid's Ajax conns.
   Allows some time for possible Ajax poller reconnects."
-  [conns_ uid buffered-evs-pstr & [{:keys [nmax-attempts ms-base ms-rand]
+  [conns_ uid buffered-evs-pstr & [{:keys [nmax-attempts ms-base ms-rand
+                                           on-complete]
                                     ;; <= 7 attempts at ~135ms ea = 945ms
                                     :or   {nmax-attempts 7
                                            ms-base       90
@@ -650,7 +652,8 @@
                      (if (or (nil? ?net-ch)
                              ;; net-ch may have closed already (`send!` will noop):
                              (not (interfaces/send! ?net-ch buffered-evs-pstr
-                                    :close-after-send)))
+                                    :close-after-send? true
+                                    :on-complete on-complete)))
                        s
                        (conj s client-id))) #{} ?pulled))
                 now-satisfied (into client-ids-satisfied ?newly-satisfied)]

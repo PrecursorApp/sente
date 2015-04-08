@@ -8,7 +8,7 @@
   i/IAsyncNetworkChannel
   (open?  [hk-ch] (http-kit/open? hk-ch))
   (close! [hk-ch] (http-kit/close hk-ch))
-  (send!* [hk-ch msg close-after-send?]
+  (send!* [hk-ch msg close-after-send? _]
     (http-kit/send! hk-ch msg close-after-send?)))
 
 (deftype HttpKitAsyncNetworkChannelAdapter []
