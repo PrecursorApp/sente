@@ -264,6 +264,13 @@
                ^:private send-buffered-evs>ajax-clients!)
 
 #+clj
+(defn combine-callbacks [buffered-cbs cb]
+  (some->> [buffered-cbs cb]
+    (filter identity)
+    seq
+    (apply juxt)))
+
+#+clj
 (defn make-channel-socket!
   "Takes a web server adapter[1] and returns a map with keys:
     :ch-recv ; core.async channel to receive `event-msg`s (internal or from clients).
@@ -377,12 +384,12 @@
                            ;; block) buffer flush calls that'll noop. They're
                            ;;  cheap, and this approach is preferable to
                            ;; alternatives like flush workers.
-                           (let [[_ ev-uuids] (get m uid)]
+                           (let [[_ {:keys [ev-uuids]}] (get m uid)]
                              (if (contains? ev-uuids ev-uuid)
                                (swapped (dissoc m uid)
                                         (get    m uid))
                                (swapped m nil)))))]
-                    (let [[buffered-evs ev-uuids] pulled]
+                    (let [[buffered-evs {:keys [ev-uuids buffered-on-complete]}] pulled]
                       (have? vector? buffered-evs)
                       (have? set?    ev-uuids)
 
@@ -395,9 +402,9 @@
                           buffered-evs-ppstr combined-packer-meta)
                         (case type
                           :ws   (send-buffered-evs>ws-clients!   conns_
-                                  uid buffered-evs-ppstr :on-complete on-complete)
+                                  uid buffered-evs-ppstr :on-complete buffered-on-complete)
                           :ajax (send-buffered-evs>ajax-clients! conns_
-                                  uid buffered-evs-ppstr :on-complete on-complete))))))]
+                                  uid buffered-evs-ppstr :on-complete buffered-on-complete))))))]
 
             (if (= ev [:chsk/close]) ; Currently undocumented
               (do
@@ -419,10 +426,12 @@
                   (swap-in! send-buffers_ [type uid]
                     (fn [?v]
                       (if-not ?v
-                        [[ev] #{ev-uuid}]
-                        (let [[buffered-evs ev-uuids] ?v]
+                        [[ev] {:ev-uuids #{ev-uuid}
+                               :buffered-on-complete on-complete}]
+                        (let [[buffered-evs {:keys [ev-uuids buffered-on-complete]}] ?v]
                           [(conj buffered-evs ev)
-                           (conj ev-uuids     ev-uuid)])))))
+                           {:ev-uuids (conj ev-uuids ev-uuid)
+                            :buffered-on-complete (combine-callbacks buffered-on-complete on-complete)}])))))
 
                 ;;; Flush event buffers after relevant timeouts:
                 ;; * May actually flush earlier due to another timeout.
