@@ -920,6 +920,7 @@
           (ajax-call url
            {:method :post :timeout-ms ?timeout-ms
             :resp-type :text ; We'll do our own pstr decoding
+            :headers {"X-CSRF-Token" (:csrf-token @state_)}
             :params
             (let [ppstr (pack packer (meta ev) ev (when ?cb-fn :ajax-cb))]
               {:_           (enc/now-udt) ; Force uncached resp
@@ -1042,7 +1043,7 @@
     :packer       ; :edn (default), or an IPacker implementation (experimental)."
   [path &
    & [{:keys [type recv-buf-or-n ws-kalive-ms lp-timeout-ms chsk-url-fn packer
-              client-id]
+              client-id csrf-token]
        :as   opts
        :or   {type          :auto
               recv-buf-or-n (async/sliding-buffer 2048) ; Mostly for buffered-evs
@@ -1112,8 +1113,10 @@
                    :packer     packer
                    :timeout-ms lp-timeout-ms
                    :curr-xhr_  (atom nil)
-                   :state_     (atom {:type :ajax :open? false
-                                      :destroyed? false})}))))
+                   :state_     (atom (merge {:type :ajax :open? false
+                                             :destroyed? false}
+                                            (when csrf-token
+                                              {:csrf-token csrf-token})))}))))
 
         _ (assert chsk "Failed to create channel socket")
         send-fn (partial chsk-send! chsk)
